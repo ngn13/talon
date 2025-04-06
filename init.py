@@ -11,6 +11,7 @@ import winreg
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
 # Talon components
+from talon_safety_check import run_safety_checks
 from components.browser_select_screen import BrowserSelectScreen
 from components.defender_check import DefenderCheck
 from components.raven_app_screen import RavenAppScreen
@@ -24,7 +25,7 @@ from components import apply_background
 
 
 """ Establish the version of Talon """
-TALON_VERSION = "1.2.0"
+TALON_VERSION = "1.3.0"
 
 
 
@@ -46,20 +47,13 @@ logging.basicConfig(
 """ Utility function to obtain information about Windows """
 def get_windows_info():
     try:
-        reg = winreg.ConnectRegistry(None, winreg.HKEY_LOCAL_MACHINE)
-        key = winreg.OpenKey(reg, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
-        build_number = int(winreg.QueryValueEx(key, "CurrentBuildNumber")[0])
-        product_name = winreg.QueryValueEx(key, "ProductName")[0]
-        display_version = winreg.QueryValueEx(key, "DisplayVersion")[0]
-        if build_number >= 22000: # Windows 11 builds start from 22000
-            os_version = "Windows 11"
-        else:
-            os_version = "Windows 10"
+        ver = sys.getwindowsversion()
+        build_number = ver.build
+        os_version = "Windows 11" if build_number >= 22000 else "Windows 10"
         return {
             'version': os_version,
             'build': build_number,
-            'product_name': product_name,
-            'display_version': display_version
+            'raw_version': f"{ver.major}.{ver.minor}.{build_number}"
         }
     except Exception as e:
         logging.error(f"Error getting Windows information: {e}")
@@ -115,6 +109,7 @@ def main():
         logging.info("Defender is disabled, proceeding with the rest of the program.")
     except Exception as e:
         logging.error(f"Error during Defender check: {e}")
+    run_safety_checks()
     selected_browser = None
     try:
         logging.info("Running Windows 11 and fresh install check...")
@@ -156,7 +151,6 @@ def main():
         except Exception as e:
             logging.error(f"Error during installation screen setup: {e}")
 
-    """ Run the installation process """
     def perform_installation():
         try:
             if install_raven:

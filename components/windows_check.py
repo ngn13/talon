@@ -10,8 +10,11 @@ from PyQt5.QtCore import Qt, QTimer
 
 """ Utility function to check if the system is Windows 11 """
 def is_windows_11():
-    version = platform.version()
-    return version.startswith("10.0") and int(platform.release()) >= 10
+    try:
+        ver = sys.getwindowsversion()
+        return ver.build >= 22000
+    except Exception as e:
+        return False
 
 
 
@@ -38,7 +41,7 @@ def show_popup(title, message, is_error=False, delay_ok=False, exit_on_error=Fal
 def check_system():
     if not is_windows_11():
         show_popup(
-            "Talon Installation Failure",
+            "Incorrect Windows Version",
             "You are currently on Windows 10 or older. <b>Talon is designed to only work on freshly installed Windows 11 systems</b>. Please update to a fresh installation of Windows 11 before attempting to use Talon again.",
             is_error=True,
             exit_on_error=True
