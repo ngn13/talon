@@ -1,5 +1,6 @@
-
-# Talon
+<p align="center">
+  <img src="banner.png" alt="Banner" width="800">
+</p>
 
 > [!NOTE]
 > All of our free software is designed to respect your privacy, while being as simple to use as possible. Our free software is licensed under the [BSD-3-Clause license](https://ravendevteam.org/files/BSD-3-Clause.txt). By using our software, you acknowledge and agree to the terms of the license.
@@ -27,3 +28,7 @@ To compile from source, make sure you have Python 3.12.4 or greater, and Nuitka,
 - [swordmasterliam](https://github.com/swordmasterliam) (Documentation Contributor)
 - [Neoskimmer](https://github.com/Neoskimmer) (Documentation Contributor)
 - [lukkaisito](https://github.com/lukkaisito) (Documentation Contributor)
+- [alcainoism](https://github.com/alcainoism) (Documentation Contributor)
+- [JanluOfficial](https://github.com/JanluOfficial) (Documentation Contributor)
+- [Xirdrak](https://github.com/Xirdrak) (Documentation Contributor)
+- [Alandlt15](https://github.com/Alandlt15) (Documentation Contributor)
