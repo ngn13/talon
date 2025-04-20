@@ -2,12 +2,18 @@
 import ctypes
 import time
 import threading
+import logging
 import os
 import sys
 from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 import wmi
+from components.resource_utils import get_resource_path
+
+
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -38,21 +44,13 @@ class DefenderCheck(QWidget):
 
     """ Load the Chakra Petch font, which is used for the UI """
     def load_chakra_petch_font(self):
-        try:
-            if getattr(sys, 'frozen', False):
-                base_path = sys._MEIPASS
-            else:
-                base_path = os.path.dirname(os.path.abspath(__file__))
-
-            font_path = os.path.join(base_path, "ChakraPetch-Regular.ttf")
-
-            font_id = QFontDatabase.addApplicationFont(font_path)
-            if font_id == -1:
-                print("Failed to load font.")
-            else:
-                print("Font loaded successfully.")
-        except Exception as e:
-            print(f"Error loading font: {e}")
+        font_path = get_resource_path("ChakraPetch-Regular.ttf")
+        if not os.path.exists(font_path):
+            raise FileNotFoundError(font_path)
+        font_id = QFontDatabase.addApplicationFont(font_path)
+        if font_id == -1:
+            raise RuntimeError("QFontDatabase failed to load ChakraPetch-Regular.ttf")
+        logger.info("Chakra Petch font loaded (id=%d)", font_id)
 
     """ Update the UI accordingly based on Windows Defender's status """
     def check_defender_status(self, immediate_check=False):

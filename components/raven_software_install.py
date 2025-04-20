@@ -13,6 +13,10 @@ from tqdm import tqdm
 
 
 
+logger = logging.getLogger(__name__)
+
+
+
 """ Set up logging """
 def log(message):
     logging.info(message)
@@ -137,10 +141,6 @@ def install_package(package, install_dir):
 
 """ Begin the process of fetching the package list then installing them """
 def run_toolbox():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
     log("Fetching package list...")
     packages_data = get_packages_json()
     if not packages_data:

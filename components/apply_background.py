@@ -1,53 +1,40 @@
-""" Import the necessary modules for the program to work """
 import os
 import sys
 import ctypes
 import shutil
+import logging
+from components.resource_utils import get_resource_path
 
+logger = logging.getLogger(__name__)
 
-
-""" Function to set the wallpaper """
-def set_wallpaper(image_path):
+def set_wallpaper(image_path: str) -> None:
     try:
-        result = ctypes.windll.user32.SystemParametersInfoW(20, 0, image_path, 3)
-        if result:
-            print("Wallpaper set successfully.")
+        success = ctypes.windll.user32.SystemParametersInfoW(20, 0, image_path, 3)
+        if success:
+            logger.info("Wallpaper set successfully")
         else:
-            print("Failed to set wallpaper.")
+            logger.error("SystemParametersInfoW returned failure")
+    except OSError as e:
+        logger.exception("OS error setting wallpaper: %s", e)
     except Exception as e:
-        print(f"Error setting wallpaper: {e}")
+        logger.exception("Unexpected error setting wallpaper: %s", e)
 
-
-
-""" Function to get the path if the application is in an uncompiled state """
-def unfrozen_path():
-    path = os.path.dirname(os.path.abspath(__file__))
-    if path.endswith("\\components"):
-        return path[:path.rfind("\\components")]
-    return path
-
-
-
-""" Main function to copy the image to the Pictures directory and set it as the wallpaper """
-def main():
-    resource_path = getattr(sys, '_MEIPASS', unfrozen_path())
-    source_image_path = os.path.join(resource_path, "DesktopBackground.png")
-    if not os.path.exists(source_image_path):
-        print(f"Error: Source image not found at {source_image_path}")
+def main() -> None:
+    logger.info("apply_background started")
+    source_image = get_resource_path("DesktopBackground.png")
+    if not os.path.exists(source_image):
+        logger.error("DesktopBackground.png not found at %s", source_image)
         return
-    pictures_dir = os.path.join(os.path.expanduser("~"), "Pictures")
-    os.makedirs(pictures_dir, exist_ok=True)
-    destination_image_path = os.path.join(pictures_dir, "DesktopBackground.png")
+    pictures = os.path.join(os.path.expanduser("~"), "Pictures")
+    os.makedirs(pictures, exist_ok=True)
+    dest = os.path.join(pictures, "DesktopBackground.png")
     try:
-        shutil.copy2(source_image_path, destination_image_path)
-        print(f"Image copied to {destination_image_path}")
-    except Exception as e:
-        print(f"Error copying file: {e}")
+        shutil.copy2(source_image, dest)
+        logger.info("Copied %s → %s", source_image, dest)
+    except (OSError, IOError) as e:
+        logger.exception("Failed to copy background: %s", e)
         return
-    set_wallpaper(destination_image_path)
+    set_wallpaper(dest)
 
-
-
-""" Run the main function """
 if __name__ == "__main__":
     main()

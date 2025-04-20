@@ -2,22 +2,22 @@
 import subprocess
 import os
 import sys
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtCore import QObject, pyqtSignal
 
+class _SafetyPopupHandler(QObject):
+    warning = pyqtSignal(str, str)
 
+def _on_warning(title: str, msg: str):
+    QMessageBox.warning(None, title, msg)
+    sys.exit(1)
 
-""" Utility function to create a UI warning popup """
-def show_warning_popup(title, message):
-    app = QApplication.instance() or QApplication(sys.argv)
-    msg_box = QMessageBox()
-    msg_box.setWindowTitle(title)
-    msg_box.setIcon(QMessageBox.Warning)
-    msg_box.setText(message)
-    msg_box.exec_()
+_popup_handler = _SafetyPopupHandler()
+_popup_handler.warning.connect(_on_warning)
 
+def show_warning_popup(title: str, message: str):
+    _popup_handler.warning.emit(title, message)
 
-
-""" Function to run a series of checks to ensure Talon can run properly """
 def run_safety_checks():
     success_count = 0
     for _ in range(3):
@@ -51,39 +51,36 @@ def run_safety_checks():
     subprocess.run(
         ["taskkill", "/F", "/IM", "OneDriveSetup.exe"],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        shell=True
+        stderr=subprocess.PIPE
     )
     subprocess.run(
         ["taskkill", "/F", "/IM", "OneDrive.exe"],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        shell=True
+        stderr=subprocess.PIPE
     )
     if code_source_network_check == 1:
         show_warning_popup(
             "Unstable Internet Connection",
-            ("Your internet connection is unstable and mostly failed the network check. "
-             "Please check your connection before running Talon.")
+            (
+                "Your internet connection is unstable and mostly failed the network check. "
+                "Please check your connection before running Talon."
+            )
         )
-        os._exit(1)
     elif code_source_network_check == 2:
         show_warning_popup(
             "No Internet Connection",
-            ("You do not have an internet connection. A common reason for this is an incorrect system time set. "
-             "Please verify your internet connection and system time before running Talon.")
+            (
+                "You do not have an internet connection. A common reason for this is an incorrect "
+                "system time set. Please verify your internet connection and system time before "
+                "running Talon."
+            )
         )
-        os._exit(1)
     if is_winget_installed == 0:
         show_warning_popup(
             "Winget Not Available",
-            ("Winget, a crucial component for Talon, is not available on your system. "
-             "Winget is typically preinstalled on Windows. Please install Winget before running Talon.")
+            (
+                "Winget, a crucial component for Talon, is not available on your system. "
+                "Winget is typically preinstalled on Windows. Please install Winget before "
+                "running Talon."
+            )
         )
-        os._exit(1)
-
-
-
-""" Run the program """
-if __name__ == '__main__':
-    run_safety_checks()

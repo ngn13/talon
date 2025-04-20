@@ -5,432 +5,350 @@ import os
 import tempfile
 import subprocess
 import requests
-import winreg
 import shutil
-import time
 import logging
-import json
+import hashlib
+import winreg
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QEventLoop
 
+logger = logging.getLogger(__name__)
 
+class ScriptError(Exception):
+    pass
 
-""" Set up the log file """
-LOG_FILE = "talon.txt"
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
-
-
-
-""" Utility function to log outputs """
-def log(message):
+def log(message: str):
+    """Log to file and stdout."""
     logging.info(message)
     print(message)
 
-
-
-""" Utility function to check if the program is running as administrator """
-def is_admin():
+def is_admin() -> bool:
+    """Returns True if running with elevation."""
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except Exception:
         return False
 
-
-
-""" If the program is not running as administrator, attempt to elevate """
 if not is_admin():
     ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, " ".join(sys.argv), None, 1
     )
     sys.exit(0)
 
+class _AskContinueHandler(QObject):
+    askSignal = pyqtSignal(str, str)
+    askResult = pyqtSignal(bool)
 
+    def __init__(self):
+        super().__init__()
+        self.askSignal.connect(self._on_ask)
 
-""" Apply modifications done via the Windows registry """
+    @pyqtSlot(str, str)
+    def _on_ask(self, title: str, message: str):
+        choice = QMessageBox.question(
+            None, title, message,
+            QMessageBox.Yes | QMessageBox.No
+        )
+        self.askResult.emit(choice == QMessageBox.Yes)
+
+_ask_handler = _AskContinueHandler()
+
+def _ask_continue(title: str, message: str) -> bool:
+    loop = QEventLoop()
+    result = {"choice": False}
+
+    def _on_result(choice: bool):
+        result["choice"] = choice
+        loop.quit()
+
+    _ask_handler.askResult.connect(_on_result)
+    _ask_handler.askSignal.emit(title, message)
+    loop.exec_()
+    _ask_handler.askResult.disconnect(_on_result)
+    return result["choice"]
+
 def apply_registry_changes():
     log("Applying registry changes...")
+    registry_modifications = [
+        # Align taskbar to the left
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
+         "TaskbarAl", winreg.REG_DWORD, 0),
+
+        # Dark mode for apps
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+         "AppsUseLightTheme", winreg.REG_DWORD, 0),
+
+        # Dark mode for system UI
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+         "SystemUsesLightTheme", winreg.REG_DWORD, 0),
+
+        # Disable Game DVR UI popup
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\GameDVR",
+         "AppCaptureEnabled", winreg.REG_DWORD, 0),
+
+        # Disable Game DVR policy (reduces FPS drops)
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR",
+         "Value", winreg.REG_DWORD, 0),
+
+        # Remove menu delay
+        (winreg.HKEY_CURRENT_USER,
+         r"Control Panel\Desktop",
+         "MenuShowDelay", winreg.REG_SZ, "0"),
+
+        # Disable window animations
+        (winreg.HKEY_CURRENT_USER,
+         r"Control Panel\Desktop\WindowMetrics",
+         "MinAnimate", winreg.REG_DWORD, 0),
+
+        # Reduce tooltip hover time
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
+         "ExtendedUIHoverTime", winreg.REG_DWORD, 1),
+
+        # Always show file extensions
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
+         "HideFileExt", winreg.REG_DWORD, 0),
+    ]
+    for root, path, name, val_type, val in registry_modifications:
+        try:
+            with winreg.CreateKeyEx(root, path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, name, 0, val_type, val)
+                log(f"Applied {name} to {path}")
+        except Exception as e:
+            log(f"Failed to modify {name} in {path}: {e}")
+    log("Restarting Explorer to apply registry tweaks...")
+    subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["start", "explorer.exe"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log("Explorer restarted.")
+
+SCRIPT_SPECS = {
+    "edge_vanisher": {
+        "url": "https://code.ravendevteam.org/talon/edge_vanisher.ps1",
+        "hash": "fa3935e37a7116d9e51696de7f72f5067ae46987eacfcfe7c25c1ed6350355ba",
+        "filename": "edge_vanisher.ps1"
+    },
+    "uninstall_oo": {
+        "url": "https://code.ravendevteam.org/talon/uninstall_oo.ps1",
+        "hash": "b5cd6e63ab023c7fe8d28674e4433aff98c820d0d6d180a10ae7b5549a7b2640",
+        "filename": "uninstall_oo.ps1"
+    },
+    "update_policy_changer": {
+        "url": "https://code.ravendevteam.org/talon/update_policy_changer.ps1",
+        "hash": "a6bfc189422a1e393a1f849b9f24b9880298e0fba1f66f1f53b577e61472f2df",
+        "filename": "UpdatePolicyChanger.ps1"
+    },
+}
+
+def _download_and_verify(spec_key):
+    spec = SCRIPT_SPECS[spec_key]
+    url, expected_hash, filename = spec["url"], spec["hash"], spec["filename"]
+    temp_dir = tempfile.gettempdir()
+    script_path = os.path.join(temp_dir, filename)
+
+    log(f"Downloading {filename} from {url}")
     try:
-        registry_modifications = [
-            # Visual changes
-            (winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "TaskbarAl", winreg.REG_DWORD, 0), # Align taskbar to the left
-            (winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "AppsUseLightTheme", winreg.REG_DWORD, 0), # Set Windows apps to dark theme
-            (winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "SystemUsesLightTheme", winreg.REG_DWORD, 0), # Set Windows to dark theme
-            (winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", "AppCaptureEnabled", winreg.REG_DWORD, 0), #Fix the  Get an app for 'ms-gamingoverlay' popup
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\PolicyManager\\default\\ApplicationManagement\\AllowGameDVR", "Value", winreg.REG_DWORD, 0), # Disable Game DVR (Reduces FPS Drops)
-            (winreg.HKEY_CURRENT_USER, r"Control Panel\\Desktop", "MenuShowDelay", winreg.REG_SZ, "0"),# Reduce menu delay for snappier UI
-            (winreg.HKEY_CURRENT_USER, r"Control Panel\\Desktop\\WindowMetrics", "MinAnimate", winreg.REG_DWORD, 0),# Disable minimize/maximize animations
-            (winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "ExtendedUIHoverTime", winreg.REG_DWORD, 1),# Reduce hover time for tooltips and UI elements
-            (winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "HideFileExt", winreg.REG_DWORD, 0),# Show file extensions in Explorer (useful for security and organization)
-        ]
-        for root_key, key_path, value_name, value_type, value in registry_modifications:
-            try:
-                with winreg.CreateKeyEx(root_key, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                    winreg.SetValueEx(key, value_name, 0, value_type, value)
-                    log(f"Applied {value_name} to {key_path}")
-            except Exception as e:
-                log(f"Failed to modify {value_name} in {key_path}: {e}")
-        log("Registry changes applied successfully.")
-        subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["start", "explorer.exe"], shell=True)
-        log("Explorer restarted to apply registry changes.")
-        run_edge_vanisher()
-        log("Edge Vanisher started successfully")
-        
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
     except Exception as e:
-        log(f"Error applying registry changes: {e}")
+        log(f"Download error for {filename}: {e}")
+        if not _ask_continue(
+            "Download Failed",
+            f"Could not download {filename}:\n{e}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
+        return None
 
+    content = resp.content
+    actual_hash = hashlib.sha256(content).hexdigest()
+    if actual_hash.lower() != expected_hash.lower():
+        log(f"Hash mismatch for {filename}: expected {expected_hash}, got {actual_hash}")
+        if not _ask_continue(
+            "Script Verification Failed",
+            f"Hash mismatch for {filename}:\nExpected {expected_hash}\nGot      {actual_hash}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
+    try:
+        with open(script_path, "wb") as f:
+            f.write(content)
+        log(f"Saved {filename} to {script_path}")
+    except Exception as e:
+        log(f"Failed to write {filename}: {e}")
+        if not _ask_continue(
+            "File Write Error",
+            f"Could not save {filename}:\n{e}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
 
+    return script_path
 
-""" Run a script to remove Edge, and prevent reinstallation """
 def run_edge_vanisher():
-    log("Starting Edge Vanisher script execution...")
-    try:
-        script_url = "https://code.ravendevteam.org/talon/edge_vanisher.ps1"
-        temp_dir = tempfile.gettempdir()
-        script_path = os.path.join(temp_dir, "edge_vanisher.ps1")
-        log(f"Attempting to download Edge Vanisher script from: {script_url}")
-        log(f"Target script path: {script_path}")
-        
-        response = requests.get(script_url)
-        log(f"Download response status code: {response.status_code}")
-        
-        with open(script_path, "wb") as file:
-            file.write(response.content)
-        log("Edge Vanisher script successfully saved to disk")
-        
-        powershell_command = (
-            f"Set-ExecutionPolicy Bypass -Scope Process -Force; "
-            f"& '{script_path}'; exit" 
-        )
-        log(f"Executing PowerShell command: {powershell_command}")
-        
-        process = subprocess.run(
-            ["powershell", "-Command", powershell_command],
-            capture_output=True,
-            text=True
-        )
-        
-        if process.returncode == 0:
-            log("Edge Vanisher execution completed successfully")
-            log(f"Process output: {process.stdout}")
-            run_oouninstall()
-        else:
-            log(f"Edge Vanisher execution failed with return code: {process.returncode}")
-            log(f"Process error: {process.stderr}")
-            run_oouninstall()
-            
-    except requests.exceptions.RequestException as e:
-        log(f"Network error during Edge Vanisher script download: {str(e)}")
-        run_oouninstall()
-    except IOError as e:
-        log(f"File I/O error while saving Edge Vanisher script: {str(e)}")
-        run_oouninstall()
-    except Exception as e:
-        log(f"Unexpected error during Edge Vanisher execution: {str(e)}")
-        run_oouninstall()
+    log("Starting Edge Vanisher")
+    script = _download_and_verify("edge_vanisher")
+    if not script:
+        return run_oouninstall()
 
-
-
-""" Run a script to remove OneDrive and Outlook """
-def run_oouninstall():
-    log("Starting Office Online uninstallation process...")
-    try:
-        script_url = "https://code.ravendevteam.org/talon/uninstall_oo.ps1"
-        temp_dir = tempfile.gettempdir()
-        script_path = os.path.join(temp_dir, "uninstall_oo.ps1")
-        log(f"Attempting to download OO uninstall script from: {script_url}")
-        log(f"Target script path: {script_path}")
-        
-        response = requests.get(script_url)
-        log(f"Download response status code: {response.status_code}")
-        
-        with open(script_path, "wb") as file:
-            file.write(response.content)
-        log("OO uninstall script successfully saved to disk")
-        
-        powershell_command = f"Set-ExecutionPolicy Bypass -Scope Process -Force; & '{script_path}'"
-        log(f"Executing PowerShell command: {powershell_command}")
-        
-        process = subprocess.run(
-            ["powershell", "-Command", powershell_command],
-            capture_output=True,
-            text=True
-        )
-        
-        if process.returncode == 0:
-            log("Office Online uninstallation completed successfully")
-            log(f"Process stdout: {process.stdout}")
-            run_tweaks()
-        else:
-            log(f"Office Online uninstallation failed with return code: {process.returncode}")
-            log(f"Process stderr: {process.stderr}")
-            log(f"Process stdout: {process.stdout}")
-            run_tweaks()
-            
-    except Exception as e:
-        log(f"Unexpected error during OO uninstallation: {str(e)}")
-        run_tweaks()
-
-
-
-""" Run ChrisTitusTech's WinUtil to debloat the system (Thanks Chris, you're a legend!) """
-def run_tweaks():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+    cmd = f"Set-ExecutionPolicy Bypass -Scope Process -Force; & '{script}'; exit"
+    log(f"Executing PowerShell: {cmd}")
+    proc = subprocess.run(
+        ["powershell", "-Command", cmd],
+        capture_output=True, text=True
     )
-    
-    if not is_admin():
-        log("Must be run as an administrator.")
-        sys.exit(1)
+    if proc.returncode != 0:
+        log(f"Edge Vanisher failed: {proc.stderr or proc.stdout}")
+        if not _ask_continue(
+            "Edge Vanisher Error",
+            f"Edge Vanisher script returned error:\n{proc.stderr or proc.stdout}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
+    else:
+        log("Edge Vanisher completed successfully")
+    return run_oouninstall()
 
+def run_oouninstall():
+    log("Starting Office Online Uninstall")
+    script = _download_and_verify("uninstall_oo")
+    if not script:
+        return run_tweaks()
+
+    cmd = f"Set-ExecutionPolicy Bypass -Scope Process -Force; & '{script}'"
+    log(f"Executing PowerShell: {cmd}")
+    proc = subprocess.run(
+        ["powershell", "-Command", cmd],
+        capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        log(f"OO Uninstall failed: {proc.stderr or proc.stdout}")
+        if not _ask_continue(
+            "Office Online Uninstall Error",
+            f"OO uninstall script returned error:\n{proc.stderr or proc.stdout}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
+    else:
+        log("OO Uninstall completed successfully")
+    return run_tweaks()
+
+def run_tweaks():
+    log("Running CTT WinUtil tweaks")
     try:
         if hasattr(sys, "_MEIPASS"):
             json_path = os.path.join(sys._MEIPASS, "barebones.json")
         else:
             json_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "barebones.json"))
-
-        log(f"Using config from: {json_path}")
+        log(f"Using config: {json_path}")
 
         temp_dir = tempfile.gettempdir()
         log_file = os.path.join(temp_dir, "cttwinutil.log")
 
-        command = [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            f"$ErrorActionPreference = 'SilentlyContinue'; " +
-            f"iex \"& {{ $(irm christitus.com/win) }} -Config '{json_path}' -Run\" *>&1 | " +
-            "Tee-Object -FilePath '" + log_file + "'"
+        cmd = [
+            "powershell", "-NoProfile", "-NonInteractive", "-Command",
+            f"$ErrorActionPreference='SilentlyContinue'; iex \"& {{ $(irm christitus.com/win) }} -Config '{json_path}' -Run\" *>&1 | Tee-Object -FilePath '{log_file}'"
         ]
-        
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         while True:
-            output = process.stdout.readline()
-            if output:
-                output = output.strip()
-                log(f"CTT Output: {output}")
-                if "Tweaks are Finished" in output:
-                    log("Detected completion message. Terminating...")
+            line = proc.stdout.readline()
+            if not line and proc.poll() is not None:
+                break
+            if line:
+                log(f"CTT: {line.strip()}")
+                if "Tweaks are Finished" in line:
+                    break
 
-                    subprocess.run(
-                        ["powershell", "-Command", "Stop-Process -Name powershell -Force"],
-                        capture_output=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-
-                    run_winconfig()
-                    os._exit(0)
-            
-            if process.poll() is not None:
-                run_winconfig()
-                os._exit(1)
-
-        return False
-
+        proc.wait()
+        if proc.returncode != 0:
+            log(f"CTT WinUtil exited with {proc.returncode}")
+            if not _ask_continue(
+                "CTT WinUtil Error",
+                f"CTT WinUtil returned code {proc.returncode}. Check logs?\n\nContinue installation anyway?"
+            ):
+                sys.exit(1)
     except Exception as e:
-        log(f"Error: {str(e)}")
-        run_winconfig()
-        os._exit(1)
+        log(f"Error running CTT WinUtil: {e}")
+        if not _ask_continue(
+            "CTT WinUtil Exception",
+            f"Exception during tweaks:\n{e}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
+    return run_winconfig()
 
-
-
-""" Run Raphi's Win11Debloat script to further debloat the system (Thanks Raphire!) """
 def run_winconfig():
-    log("Starting Windows configuration process...")
+    log("Running Raphi’s Win11Debloat")
     try:
-        script_url = "https://win11debloat.raphi.re/"
+        url = "https://win11debloat.raphi.re/"
         temp_dir = tempfile.gettempdir()
         script_path = os.path.join(temp_dir, "Win11Debloat.ps1")
-        log(f"Attempting to download Windows configuration script from: {script_url}")
-        log(f"Target script path: {script_path}")
-        
-        response = requests.get(script_url)
-        log(f"Download response status code: {response.status_code}")
-        
-        with open(script_path, "wb") as file:
-            file.write(response.content)
-        log("Windows configuration script successfully saved to disk")
-        
-        powershell_command = (
-            f"Set-ExecutionPolicy Bypass -Scope Process -Force; "
-            f"& '{script_path}' -Silent -RemoveApps -RemoveGamingApps -DisableTelemetry "
-            f"-DisableBing -DisableSuggestions -DisableLockscreenTips -RevertContextMenu "
-            f"-TaskbarAlignLeft -HideSearchTb -DisableWidgets -DisableCopilot -ExplorerToThisPC"
-            f"-ClearStartAllUsers -DisableDVR -DisableStartRecommended -ExplorerToThisPC"
-            f"-DisableMouseAcceleration"
+        log(f"Downloading Raphi script from {url}")
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        with open(script_path, "wb") as f:
+            f.write(resp.content)
+        cmd = (
+            f"Set-ExecutionPolicy Bypass -Scope Process -Force; & '{script_path}' "
+            "-Silent -RemoveApps -RemoveGamingApps -DisableTelemetry "
+            "-DisableBing -DisableSuggestions -DisableLockscreenTips -RevertContextMenu "
+            "-TaskbarAlignLeft -HideSearchTb -DisableWidgets -DisableCopilot -ExplorerToThisPC "
+            "-ClearStartAllUsers -DisableDVR -DisableStartRecommended -ExplorerToThisPC "
+            "-DisableMouseAcceleration"
         )
-        log(f"Executing PowerShell command with parameters:")
-        log(f"Command: {powershell_command}")
-        
-        process = subprocess.run(
-            ["powershell", "-Command", powershell_command],
-            capture_output=True,
-            text=True
-        )
-        
-        if process.returncode == 0:
-            log("Windows configuration completed successfully")
-            log(f"Process stdout: {process.stdout}")
-            log("Preparing to transition to UpdatePolicyChanger...")
-            try:
-                log("Initiating UpdatePolicyChanger process...")
-                run_updatepolicychanger()
-            except Exception as e:
-                log(f"Failed to start UpdatePolicyChanger: {e}")
-                log("Attempting to continue with installation despite UpdatePolicyChanger failure")
-                run_updatepolicychanger()
-        else:
-            log(f"Windows configuration failed with return code: {process.returncode}")
-            log(f"Process stderr: {process.stderr}")
-            log(f"Process stdout: {process.stdout}")
-            log("Attempting to continue with UpdatePolicyChanger despite WinConfig failure")
-            try:
-                log("Initiating UpdatePolicyChanger after WinConfig failure...")
-                run_updatepolicychanger()
-            except Exception as e:
-                log(f"Failed to start UpdatePolicyChanger after WinConfig failure: {e}")
-                log("Proceeding to finalize installation...")
-                run_updatepolicychanger()
-            
-    except requests.exceptions.RequestException as e:
-        log(f"Network error during Windows configuration script download: {str(e)}")
-        log("Attempting to continue with UpdatePolicyChanger despite network error")
-        try:
-            run_updatepolicychanger()
-        except Exception as inner_e:
-            log(f"Failed to start UpdatePolicyChanger after network error: {inner_e}")
-            run_updatepolicychanger()
-    except IOError as e:
-        log(f"File I/O error while saving Windows configuration script: {str(e)}")
-        log("Attempting to continue with UpdatePolicyChanger despite I/O error")
-        try:
-            run_updatepolicychanger()
-        except Exception as inner_e:
-            log(f"Failed to start UpdatePolicyChanger after I/O error: {inner_e}")
-            run_updatepolicychanger()
+        log(f"Executing PowerShell: {cmd}")
+        proc = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True)
+        if proc.returncode != 0:
+            log(f"Win11Debloat failed: {proc.stderr or proc.stdout}")
+            if not _ask_continue(
+                "Win11Debloat Error",
+                f"Raphi’s script returned error:\n{proc.stderr or proc.stdout}\n\nContinue installation anyway?"
+            ):
+                sys.exit(1)
     except Exception as e:
-        log(f"Unexpected error during Windows configuration: {str(e)}")
-        log("Attempting to continue with UpdatePolicyChanger despite unexpected error")
-        try:
-            run_updatepolicychanger()
-        except Exception as inner_e:
-            log(f"Failed to start UpdatePolicyChanger after unexpected error: {inner_e}")
-            run_updatepolicychanger()
+        log(f"Error running Win11Debloat: {e}")
+        if not _ask_continue(
+            "Win11Debloat Exception",
+            f"Exception during Win11Debloat:\n{e}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
+    return run_updatepolicychanger()
 
-
-
-""" Run a script to establish an update policy which only accepts security updates """
 def run_updatepolicychanger():
-    log("Starting UpdatePolicyChanger script execution...")
-    log("Checking system state before UpdatePolicyChanger execution...")
-    try:
-        script_url = "https://code.ravendevteam.org/talon/update_policy_changer.ps1"
-        temp_dir = tempfile.gettempdir()
-        script_path = os.path.join(temp_dir, "UpdatePolicyChanger.ps1")
-        log(f"Attempting to download UpdatePolicyChanger script from: {script_url}")
-        log(f"Target script path: {script_path}")
-        
-        try:
-            response = requests.get(script_url)
-            log(f"Download response status code: {response.status_code}")
-            log(f"Response headers: {response.headers}")
-            
-            if response.status_code != 200:
-                log(f"Unexpected status code: {response.status_code}")
-                raise requests.exceptions.RequestException(f"Failed to download: Status code {response.status_code}")
-                
-            content_length = len(response.content)
-            log(f"Downloaded content length: {content_length} bytes")
-            
-            with open(script_path, "wb") as file:
-                file.write(response.content)
-            log("UpdatePolicyChanger script successfully saved to disk")
-            log(f"Verifying file exists at {script_path}")
-            
-            if not os.path.exists(script_path):
-                raise IOError("Script file not found after saving")
-            
-            file_size = os.path.getsize(script_path)
-            log(f"Saved file size: {file_size} bytes")
-            
-        except requests.exceptions.RequestException as e:
-            log(f"Network error during script download: {e}")
-            raise
-        
-        log("Preparing PowerShell command execution...")
-        powershell_command = (
-            f"Set-ExecutionPolicy Bypass -Scope Process -Force; "
-            f"& '{script_path}'; exit" 
-        )
-        log(f"PowerShell command prepared: {powershell_command}")
-        
-        try:
-            log("Executing PowerShell command...")
-            process = subprocess.run(
-                ["powershell", "-Command", powershell_command],
-                capture_output=True,
-                text=True,
-            )
-            
-            log(f"PowerShell process completed with return code: {process.returncode}")
-            log(f"Process stdout length: {len(process.stdout)}")
-            log(f"Process stderr length: {len(process.stderr)}")
-            
-            if process.stdout:
-                log(f"Process output: {process.stdout}")
-            if process.stderr:
-                log(f"Process errors: {process.stderr}")
-            
-            if process.returncode == 0:
-                log("UpdatePolicyChanger execution completed successfully")
-                log("Preparing to finalize installation...")
-                finalize_installation()
-            else:
-                log(f"UpdatePolicyChanger execution failed with return code: {process.returncode}")
-                log("Proceeding with finalization despite failure...")
-                finalize_installation()
-                
-        except subprocess.TimeoutExpired:
-            log("PowerShell command execution timed out after 5 minutes")
-            finalize_installation()
-        except subprocess.SubprocessError as e:
-            log(f"Error executing PowerShell command: {e}")
-            finalize_installation()
-            
-    except Exception as e:
-        log(f"Critical error in UpdatePolicyChanger: {e}")
-        log("Proceeding to finalization due to critical error...")
-        finalize_installation()
+    log("Running UpdatePolicyChanger")
+    script = _download_and_verify("update_policy_changer")
+    if not script:
+        return finalize_installation()
 
+    cmd = f"Set-ExecutionPolicy Bypass -Scope Process -Force; & '{script}'; exit"
+    log(f"Executing PowerShell: {cmd}")
+    proc = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True)
+    if proc.returncode != 0:
+        log(f"UpdatePolicyChanger failed: {proc.stderr or proc.stdout}")
+        if not _ask_continue(
+            "UpdatePolicyChanger Error",
+            f"Script returned error:\n{proc.stderr or proc.stdout}\n\nContinue installation anyway?"
+        ):
+            sys.exit(1)
 
+    return finalize_installation()
 
-""" Finalize installation by restarting """
 def finalize_installation():
-    log("Installation complete. Restarting system...")
+    log("Installation complete. Restarting system…")
     try:
         subprocess.run(["shutdown", "/r", "/t", "0"], check=True)
-    except subprocess.CalledProcessError as e:
-        log(f"Error during restart: {e}")
-        try:
-            os.system("shutdown /r /t 0")
-        except Exception as e:
-            log(f"Failed to restart system: {e}")
+    except Exception as e:
+        log(f"Restart failed: {e}")
+        if not _ask_continue(
+            "Restart Failed",
+            f"Could not restart automatically:\n{e}\n\nYou will need to restart manually."
+        ):
+            sys.exit(1)
 
-
-
-""" Run the program """
-if __name__ == "__main__":
+def run_debloat():
     apply_registry_changes()
+    run_edge_vanisher()
+    run_oouninstall()
+    run_tweaks()
+    run_winconfig()
+    run_updatepolicychanger()
+    finalize_installation()

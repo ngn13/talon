@@ -1,6 +1,7 @@
 """ Import necessary modules for the program to work """
 import sys
 import os
+from components.resource_utils import get_resource_path
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QApplication
 )
@@ -38,24 +39,24 @@ class InstallScreen(QWidget):
         spinner_layout.addWidget(self.spinner)
         self.spinner.start_spinning()
         layout.addLayout(spinner_layout)
+        self.status_label = QLabel("Preparing installation…")
+        self.status_label.setStyleSheet("color: gray;")
+        self.status_label.setFont(QFont("Chakra Petch", 14))
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
         self.setLayout(layout)
+
+    def set_status(self, text: str):
+        self.status_label.setText(text)
 
     """ Load the Chakra Petch font, which is used for the UI """
     def load_chakra_petch_font(self):
-        font_path = self.get_resource_path("ChakraPetch-Regular.ttf")
+        font_path = get_resource_path("ChakraPetch-Regular.ttf")
         font_id = QFontDatabase.addApplicationFont(font_path)
         if font_id == -1:
             print("Failed to load font.")
         else:
             print("Font loaded successfully.")
-
-    """ Get the correct resource path """
-    def get_resource_path(self, relative_path):
-        if getattr(sys, 'frozen', False):
-            base_path = sys._MEIPASS
-        else:
-            base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        return os.path.join(base_path, relative_path)
 
     """ Create overlays for other screens """
     def create_screen_overlays(self):

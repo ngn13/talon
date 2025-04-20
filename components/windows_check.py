@@ -1,8 +1,5 @@
 """ Import necessary modules for the program to work """
 import sys
-import platform
-import os
-import time
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QTimer
 
@@ -32,7 +29,7 @@ def show_popup(title, message, is_error=False, delay_ok=False, exit_on_error=Fal
         QTimer.singleShot(3000, lambda: ok_button.setEnabled(True))
     msg_box.exec_()
     if exit_on_error:
-        os._exit(1)
+        sys.exit(1)
 
 
 

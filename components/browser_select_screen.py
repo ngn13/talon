@@ -2,8 +2,9 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QGraphicsDropShadowEffect, QSpacerItem, QSizePolicy
 )
+from components.resource_utils import get_resource_path
 from PyQt5.QtGui import QColor, QFont, QFontDatabase, QPixmap
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal
 import os
 import sys
 
@@ -76,7 +77,7 @@ class BrowserSelectScreen(QWidget):
         title_layout.setStretch(0, 1)
         layout.addLayout(title_layout)
         image_label = QLabel(self)
-        image_path = self.get_resource_path("browser_selection.png")
+        image_path = get_resource_path("browser_selection.png")
         pixmap = QPixmap(image_path)
         screen_width = QApplication.primaryScreen().size().width()
         scaled_pixmap = pixmap.scaledToWidth(int(screen_width * 0.6), Qt.SmoothTransformation)
@@ -118,25 +119,20 @@ class BrowserSelectScreen(QWidget):
 
     """ Load the Chakra Petch font, which is used for the UI """
     def load_chakra_petch_font(self):
-        font_path = self.get_resource_path("ChakraPetch-Regular.ttf")
+        font_path = get_resource_path("ChakraPetch-Regular.ttf")
         font_id = QFontDatabase.addApplicationFont(font_path)
         if font_id == -1:
             print("Failed to load font.")
         else:
             print("Font loaded successfully.")
 
-    """ Get the correct resource path, whether running as a script or an EXE """
-    def get_resource_path(self, relative_path):
-        if getattr(sys, 'frozen', False):
-            base_path = sys._MEIPASS
-        else:
-            base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        return os.path.join(base_path, relative_path)
+    browser_selected = pyqtSignal(str)
 
     """ Return value of the selected browser """
     def select_browser(self, browser_name):
         self.selected_browser = browser_name
         print(f"Selected browser: {self.selected_browser}")
+        self.browser_selected.emit(browser_name)
         self.close()
         return self.selected_browser
 
