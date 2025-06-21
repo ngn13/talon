@@ -22,6 +22,8 @@ To compile from source, make sure you have Python 3.12.4 or greater, install the
 - [ChrisTitusTech](https://github.com/christitustech) ([CTT WinUtil](https://github.com/christitustech/winutil))
 - [Raphire](https://github.com/Raphire) ([Win11Debloat](https://github.com/Raphire/Win11Debloat))
 - [mre31](https://github.com/mre31)
+- [DTLegit](https://github.com/DTLegit)
+- [zombiehunternr1](https://github.com/zombiehunternr1)
 - [lilafian](https://github.com/lilafian)
 - [winston113](https://github.com/winston113)
 - [GabanKillasta](https://github.com/GabanKillasta)
