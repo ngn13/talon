@@ -16,12 +16,7 @@
                       "WPFTweaksLoc",
                       "WPFTweaksRemoveOnedrive",
                       "WPFTweaksServices",
-                      "WPFTweaksDeleteTempFiles",
                       "WPFTweaksRecallOff",
                       "WPFTweaksDisableBGapps"
-                  ],
-    "WPFFeature":  [
-                       "WPFFeaturesSandbox",
-                       "WPFFeatureshyperv"
-                   ]
+                  ]
 }
