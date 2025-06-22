@@ -15,6 +15,9 @@ You can download the latest version of Talon from [here](https://debloat.win). E
 
 To compile from source, make sure you have Python 3.12.4 or greater, install the necessary libraries from `requirements.txt`, then run `build.bat`. **Please note that, when building from source, you are building the absolute latest version of the code (even newer than the most recent release)**!
 
+# Documentation
+Documentation is available [here](https://docs.ravendevteam.org/talon).
+
 ## Authors & Contributors
 
 - [Raven Development Team](https://ravendevteam.org/)
