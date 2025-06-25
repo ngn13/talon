@@ -20,12 +20,13 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Clean the build script
+      - name: Patch the build script
         shell: pwsh
         run: |
-          (Get-Content "build.bat" |
-           Select-String -pattern "@echo off" -notmatch |
-           Select-String -pattern "pause" -notmatch) |
+          (Get-Content "build.bat").replace(
+            "nutika ^", "nutika --assume-yes-for-downloads ^") |
+          Select-String -pattern "@echo off" -notmatch |
+          Select-String -pattern "pause" -notmatch |
           Set-Content "build.bat"
 
       - name: Run the build script
