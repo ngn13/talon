@@ -39,8 +39,7 @@ jobs:
         working-directory: dist
         run: |
           mv talon.exe talon-${{github.event.release.name}}.exe
-          7zip x ^
-            talon-${{github.event.release.name}}.zip ^
+          7z a talon-${{github.event.release.name}}.zip ^
             talon-${{github.event.release.name}}.exe
 
       - name: Create SHA512 summary
