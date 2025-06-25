@@ -28,6 +28,9 @@ jobs:
            Select-String -pattern "pause" -notmatch) |
           Set-Content "build.bat"
 
+      - name: Run the build script
+        run: .\build.bat
+
       - name: List build files
         run: |
           dir
