@@ -38,7 +38,7 @@ jobs:
         working-directory: dist
         run: |
           mv talon.exe talon-${{github.event.release.name}}.exe
-          7z a talon-${{github.event.release.name}}.zip `
+          7z a -mx=9 -tzip talon-${{github.event.release.name}}.zip `
             talon-${{github.event.release.name}}.exe
 
       - name: Create SHA512 summary
@@ -47,12 +47,12 @@ jobs:
           $hash = $(Get-FileHash talon-${{github.event.release.name}}.exe `
             -Algorithm sha512).Hash
           echo "$hash talon-${{github.event.release.name}}.exe" > `
-            talon-${{github.event.release.name}}.sha512sums
+            talon-${{github.event.release.name}}.sha512
 
       - name: Add files to the release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
           files: |
-            dist/talon-${{github.event.release.name}}.sha512sums
+            dist/talon-${{github.event.release.name}}.sha512
             dist/talon-${{github.event.release.name}}.zip
