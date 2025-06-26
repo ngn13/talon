@@ -1,6 +1,13 @@
 name: Release
 
 on:
+  push:
+    branches:
+      - "main"
+      - "release-workflow-test" # just for testing
+    paths-ignore:
+      - "NOTICE"
+      - "README.md"
   release:
     types: [created]
 
@@ -8,7 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
     steps:
       - name: Checkout the source code
@@ -20,9 +27,6 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Install 7zip
-        run: choco install 7zip
-
       - name: Patch the build script
         run: |
           (Get-Content "build.bat").replace(
@@ -33,6 +37,25 @@ jobs:
 
       - name: Run the build script
         run: .\build.bat
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: executable
+          path: dist/talon.exe
+
+  release:
+    runs-on: windows-latest
+    if: github.event.type == 'ReleaseEvent'
+    steps:
+      - name: Download executable
+        uses: actions/download-artifact@v4
+        with:
+          name: executable
+          path: .
+
+      - name: Install 7zip
+        run: choco install 7zip
 
       - name: Create release archive
         working-directory: dist
