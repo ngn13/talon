@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - "main"
+    paths-ignore:
+      - "NOTICE"
+      - "README.md"
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v4
+
+      - name: Setup python3
+        uses: actions/setup-python@v5
+        with:
+          python-version: ">=3.12.4"
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Patch the build script
+        run: |
+          (Get-Content "build.bat").replace(
+            "nuitka ^", "nuitka --assume-yes-for-downloads ^") |
+          Select-String -pattern "@echo off" -notmatch |
+          Select-String -pattern "pause" -notmatch |
+          Set-Content "build.bat"
+
+      - name: Run the build script
+        run: .\build.bat
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: talon
+          path: dist/talon.exe
+
+  release:
+    runs-on: windows-latest
+    needs: build
+    if: github.event_name == 'release'
+    steps:
+      - name: Download executable
+        uses: actions/download-artifact@v4
+        with:
+          name: talon
+          path: .
+
+      - name: Install 7zip
+        run: choco install 7zip
+
+      - name: Create release archive
+        run: |
+          mv talon.exe talon-${{github.event.release.name}}.exe
+          7z a -mx=9 -tzip talon-${{github.event.release.name}}.zip `
+            talon-${{github.event.release.name}}.exe
+
+      - name: Create SHA512 summary
+        run: |
+          $hash = $(Get-FileHash talon-${{github.event.release.name}}.exe `
+            -Algorithm sha512).Hash
+          echo "$hash talon-${{github.event.release.name}}.exe" > `
+            talon-${{github.event.release.name}}.sha512
+
+      - name: Add files to the release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: |
+            talon-${{github.event.release.name}}.sha512
+            talon-${{github.event.release.name}}.zip
