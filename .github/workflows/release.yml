@@ -48,6 +48,7 @@ jobs:
 
   release:
     runs-on: windows-latest
+    needs: build
     if: github.event_name == 'release'
     steps:
       - name: Download executable
