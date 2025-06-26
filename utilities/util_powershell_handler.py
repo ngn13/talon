@@ -46,6 +46,8 @@ def run_powershell_script(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             creationflags=creationflags,
         )
@@ -143,6 +145,8 @@ def run_powershell_command(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             creationflags=creationflags,
         )
